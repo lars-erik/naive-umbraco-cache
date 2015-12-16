@@ -19,15 +19,19 @@ namespace Naive.Cache
 {
     internal class PublicAccessRepository : PetaPocoRepositoryBase<Guid, PublicAccessEntry>, IPublicAccessRepository
     {
+        private const string CacheKey = "AllPublicAccess";
         private static readonly object lockObj = new object();
 
         public new IEnumerable<PublicAccessEntry> GetAll(params Guid[] ids)
         {
             IEnumerable<PublicAccessEntry> entries;
 
-            lock(lockObj)
+            if (HttpContext.Current == null || HttpContext.Current.Cache == null)
+                return PerformGetAll(ids).WhereNotNull().ToArray();
+
+            lock (lockObj)
             { 
-                entries = HttpContext.Current.Cache["AllPublicAccess"] as IEnumerable<PublicAccessEntry>;
+                entries = HttpContext.Current.Cache[CacheKey] as IEnumerable<PublicAccessEntry>;
 
                 if (entries == null)
                 {
@@ -36,11 +40,20 @@ namespace Naive.Cache
                         .WhereNotNull()
                         .ToArray();
 
-                    HttpContext.Current.Cache.Add("AllPublicAccess", entries, null, DateTime.Now.AddHours(1), TimeSpan.Zero, CacheItemPriority.Normal, null);
+                    HttpContext.Current.Cache.Add(CacheKey, entries, null, DateTime.Now.AddHours(1), TimeSpan.Zero, CacheItemPriority.Normal, null);
                 }
             }
 
+            if (ids.Length > 0)
+                return entries.Where(d => ids.Contains(d.Key));
             return entries;
+        }
+
+        private void ResetCache()
+        {
+            if (HttpContext.Current == null || HttpContext.Current.Cache == null)
+                return;
+            HttpContext.Current.Cache.Remove(CacheKey);
         }
 
         public PublicAccessRepository(IDatabaseUnitOfWork work, CacheHelper cache, ILogger logger, ISqlSyntaxProvider sqlSyntax)
@@ -158,6 +171,8 @@ namespace Naive.Cache
             }
 
             entity.ResetDirtyProperties();
+
+            ResetCache();
         }
 
         protected override void PersistUpdatedItem(PublicAccessEntry entity)
@@ -202,6 +217,8 @@ namespace Naive.Cache
             }
 
             entity.ResetDirtyProperties();
+
+            ResetCache();
         }
 
         protected override Guid GetEntityId(PublicAccessEntry entity)

@@ -19,15 +19,19 @@ namespace Naive.Cache
 {
     internal class LanguageRepository : PetaPocoRepositoryBase<int, ILanguage>, ILanguageRepository
     {
+        private const string CacheKey = "AllLanguages";
         private static readonly object lockObj = new object();
 
         public new IEnumerable<ILanguage> GetAll(params int[] ids)
         {
             IEnumerable<ILanguage> languages;
 
+            if (HttpContext.Current == null || HttpContext.Current.Cache == null)
+                return PerformGetAll(ids).WhereNotNull().ToArray();
+
             lock (lockObj)
             {
-                languages = HttpContext.Current.Cache["AllLanguages"] as IEnumerable<ILanguage>;
+                languages = HttpContext.Current.Cache[CacheKey] as IEnumerable<ILanguage>;
 
                 if (languages == null)
                 {
@@ -36,11 +40,20 @@ namespace Naive.Cache
                         .WhereNotNull()
                         .ToArray();
 
-                    HttpContext.Current.Cache.Add("AllLanguages", languages, null, DateTime.Now.AddHours(1), TimeSpan.Zero, CacheItemPriority.Normal, null);
+                    HttpContext.Current.Cache.Add(CacheKey, languages, null, DateTime.Now.AddHours(1), TimeSpan.Zero, CacheItemPriority.Normal, null);
                 }
             }
 
+            if (ids.Length > 0)
+                return languages.Where(d => ids.Contains(d.Id));
             return languages;
+        }
+
+        private void ResetCache()
+        {
+            if (HttpContext.Current == null || HttpContext.Current.Cache == null)
+                return;
+            HttpContext.Current.Cache.Remove(CacheKey);
         }
 
         // Copied from Umbraco
@@ -148,6 +161,8 @@ namespace Naive.Cache
             entity.Id = id;
 
             entity.ResetDirtyProperties();
+
+            ResetCache();
         }
 
         protected override void PersistUpdatedItem(ILanguage entity)
@@ -164,6 +179,8 @@ namespace Naive.Cache
             //Clear the cache entries that exist by key/iso
             RuntimeCache.ClearCacheItem(GetCacheIdKey<ILanguage>(entity.IsoCode));
             RuntimeCache.ClearCacheItem(GetCacheIdKey<ILanguage>(entity.CultureName));
+
+            ResetCache();
         }
 
         protected override void PersistDeletedItem(ILanguage entity)
@@ -173,6 +190,8 @@ namespace Naive.Cache
             //Clear the cache entries that exist by key/iso
             RuntimeCache.ClearCacheItem(GetCacheIdKey<ILanguage>(entity.IsoCode));
             RuntimeCache.ClearCacheItem(GetCacheIdKey<ILanguage>(entity.CultureName));
+
+            ResetCache();
         }
 
         #endregion

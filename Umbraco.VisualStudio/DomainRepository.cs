@@ -18,27 +18,41 @@ namespace Naive.Cache
 {
     internal class DomainRepository : PetaPocoRepositoryBase<int, IDomain>, IDomainRepository
     {
+        private const string CacheKey = "AllDomains";
         private static readonly object lockObj = new object();
 
         public new IEnumerable<IDomain> GetAll(params int[] ids)
         {
             IEnumerable<IDomain> domains;
+
+            if (HttpContext.Current == null || HttpContext.Current.Cache == null)
+                return PerformGetAll(ids).WhereNotNull().ToArray();
+
             lock(lockObj)
             {
-                domains = HttpContext.Current.Cache["AllDomains"] as IEnumerable<IDomain>;
+                domains = HttpContext.Current.Cache[CacheKey] as IEnumerable<IDomain>;
                 if (domains == null)
                 {
-                    domains = PerformGetAll(ids)
+                    domains = PerformGetAll()
                         //ensure we don't include any null refs in the returned collection!
                         .WhereNotNull()
                         .ToArray();
 
-                    HttpContext.Current.Cache.Add("AllDomains", domains, null, DateTime.Now.AddHours(1), TimeSpan.Zero, CacheItemPriority.Normal, null);
+                    HttpContext.Current.Cache.Add(CacheKey, domains, null, DateTime.Now.AddHours(1), TimeSpan.Zero, CacheItemPriority.Normal, null);
                 }
             }
 
+            if (ids.Length > 0)
+                return domains.Where(d => ids.Contains(d.Id));
             return domains;
-        } 
+        }
+
+        private void ResetCache()
+        {
+            if (HttpContext.Current == null || HttpContext.Current.Cache == null)
+                return;
+            HttpContext.Current.Cache.Remove(CacheKey);
+        }
 
         // Copied from Umbraco
 
@@ -154,6 +168,8 @@ namespace Naive.Cache
             }
 
             entity.ResetDirtyProperties();
+
+            ResetCache();
         }
 
         protected override void PersistUpdatedItem(IDomain entity)
@@ -189,6 +205,8 @@ namespace Naive.Cache
             }
 
             entity.ResetDirtyProperties();
+
+            ResetCache();
         }
 
         public IDomain GetByName(string domainName)
